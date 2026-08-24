@@ -30,9 +30,14 @@ function writeOpencodeConfig(ws) {
         options: { baseURL: `${OLLAMA_BASE_URL}/v1`, apiKey: 'ollama' },
         models: { [OLLAMA_MODEL]: { tool_call: true, reasoning: false } }
       }
-    }
+    },
+    permission: { edit: 'allow' }
   }
   fs.writeFileSync(path.join(ws, 'opencode.json'), JSON.stringify(config, null, 2))
+  fs.writeFileSync(
+    path.join(ws, 'AGENTS.md'),
+    `# Project rules\n\n- Create ALL files inside the current working directory (relative paths only).\n- NEVER write to /path/to, /tmp, or any absolute path outside this directory.\n- This is a brand-new empty project: create every file you mention.\n`
+  )
 }
 
 export function getModel() {
