@@ -29,7 +29,7 @@ services:
       - FORGE_PASSWORD=${FORGE_PASSWORD}
       - FORGE_SECRET=${FORGE_SECRET}
       - OLLAMA_BASE_URL=http://192.168.1.154:11434
-      - OLLAMA_MODEL=qwen2.5-coder:7b
+      - OLLAMA_MODEL=qwen2.5:7b-instruct
     volumes:
       - forge-data:/data
     restart: unless-stopped

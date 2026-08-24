@@ -13,7 +13,9 @@ const cmd = JSON.parse(fs.readFileSync(process.argv[2], 'utf8')).cmd;
     method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: cookie },
     body: JSON.stringify({ cmd, timeoutMs: 290000 })
   });
-  const j = await r.json();
+  const text = await r.text();
+  let j;
+  try { j = JSON.parse(text); } catch { console.log('status:', r.status, 'RAW:', text.slice(0, 300)); return; }
   console.log('code:', j.code);
   if (j.out) console.log('OUT:', j.out.slice(-3000));
   if (j.err) console.log('ERR:', j.err.slice(-3000));

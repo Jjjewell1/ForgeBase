@@ -28,7 +28,7 @@ function writeOpencodeConfig(ws) {
         npm: '@ai-sdk/openai-compatible',
         name: 'Ollama (Unraid)',
         options: { baseURL: `${OLLAMA_BASE_URL}/v1`, apiKey: 'ollama' },
-        models: { [OLLAMA_MODEL]: {} }
+        models: { [OLLAMA_MODEL]: { tool_call: true, reasoning: false } }
       }
     }
   }
