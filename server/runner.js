@@ -109,7 +109,7 @@ async function runBuild(build, ws) {
     const child = spawn('opencode', ['run', '-m', `ollama/${build.model}`, build.prompt], {
       cwd: ws,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, OPENCODE_DISABLE_AUTOUPDATE: 'true' }
+      env: { ...process.env, HOME: '/root', OPENCODE_DISABLE_AUTOUPDATE: 'true' }
     })
 
     const timer = setTimeout(() => {
