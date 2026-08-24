@@ -93,6 +93,12 @@ async function runBuild(build, ws) {
   build.startedAt = Date.now()
   log(build, `$ opencode run -m ollama/${build.model}`)
 
+  // opencode misbehaves when its stdio are pipes/devnull (instant "server error").
+  // The proven-working invocation is bash with FILE redirects — so we quote the
+  // prompt into the command line and capture o.txt/e.txt afterwards.
+  const shQuote = s => `'` + String(s).replace(/'/g, `'\\''`) + `'`
+  const cmd = `opencode run -m ollama/${shQuote(build.model)} ${shQuote(build.prompt)} > o.txt 2> e.txt`
+
   await new Promise(resolve => {
     let settled = false
     const finish = (status, extra = {}) => {
@@ -102,24 +108,27 @@ async function runBuild(build, ws) {
       build.status = status
       build.finishedAt = Date.now()
       Object.assign(build, extra)
+      // harvest captured output
+      try {
+        const out = fs.readFileSync(path.join(ws, 'e.txt'), 'utf8')
+        const so = fs.readFileSync(path.join(ws, 'o.txt'), 'utf8')
+        for (const line of out.split(/\r?\n/)) if (line.trim()) log(build, `[stderr] ${line.slice(0, 400)}`)
+        for (const line of so.split(/\r?\n/)) if (line.trim()) log(build, line.slice(0, 400))
+      } catch { /* files may be missing on early crash */ }
       resolve()
     }
 
-    // stdin MUST be closed ('ignore') or opencode waits forever for piped input
-    const child = spawn('opencode', ['run', '-m', `ollama/${build.model}`, build.prompt], {
+    const child = spawn('bash', ['-c', `cd ${shQuote(ws)} && ${cmd}`], {
       cwd: ws,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: 'ignore',
       env: { ...process.env, HOME: '/root', OPENCODE_DISABLE_AUTOUPDATE: 'true' }
     })
 
     const timer = setTimeout(() => {
-      log(build, '[timeout] killing after 20 minutes')
       child.kill('SIGKILL')
       finish('error', { error: 'Timed out after 20 minutes' })
     }, TIMEOUT_MS)
 
-    child.stdout.on('data', d => d.toString().split(/\r?\n/).forEach(l => l && log(build, l)))
-    child.stderr.on('data', d => d.toString().split(/\r?\n/).forEach(l => l && log(build, `[stderr] ${l}`)))
     child.on('error', e => finish('error', { error: e.message }))
     child.on('close', code => {
       if (code === 0) finish('done', { exitCode: 0 })
