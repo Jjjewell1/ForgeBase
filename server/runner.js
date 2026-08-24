@@ -81,6 +81,14 @@ export function createBuild(prompt) {
   builds.set(buildId, build)
   runWhenFree(build, ws)
   return { build: publicBuild(build) }
+
+  // Small models love hallucinating "/path/to/x". Make that harmless: point
+  // /path/to at the ACTIVE workspace (runner is single-concurrency).
+  try {
+    fs.mkdirSync('/path', { recursive: true })
+    try { fs.unlinkSync('/path/to') } catch {}
+    fs.symlinkSync(ws, '/path/to')
+  } catch { /* best effort */ }
 }
 
 function runWhenFree(build, ws) {
@@ -102,7 +110,8 @@ async function runBuild(build, ws) {
   // The proven-working invocation is bash with FILE redirects — so we quote the
   // prompt into the command line and capture o.txt/e.txt afterwards.
   const shQuote = s => `'` + String(s).replace(/'/g, `'\\''`) + `'`
-  const cmd = `opencode run -m ollama/${shQuote(build.model)} ${shQuote(build.prompt)} > o.txt 2> e.txt`
+  const fullPrompt = build.prompt + '\n\n(IMPORTANT: create all files with RELATIVE paths in the current directory — never /path/to/.)'
+  const cmd = `opencode run -m ollama/${shQuote(build.model)} ${shQuote(fullPrompt)} > o.txt 2> e.txt`
 
   await new Promise(resolve => {
     let settled = false
