@@ -79,7 +79,7 @@ app.post('/api/debug/exec', async (req, res) => {
       env: { ...process.env, HOME: '/root' },
     })
     let out = '', err = ''
-    const timer = setTimeout(() => child.kill('SIGKILL'), Math.min(timeoutMs || 25000, 120000))
+    const timer = setTimeout(() => child.kill('SIGKILL'), Math.min(timeoutMs || 25000, 300000))
     child.stdout.on('data', d => (out += d))
     child.stderr.on('data', d => (err += d))
     child.on('error', e => { clearTimeout(timer); res.json({ code: -1, out, err: err + String(e) }) })

@@ -11,7 +11,7 @@ const cmd = JSON.parse(fs.readFileSync(process.argv[2], 'utf8')).cmd;
   const cookie = (r.headers.get('set-cookie') || '').split(';')[0];
   r = await fetch(BASE + '/api/debug/exec', {
     method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: cookie },
-    body: JSON.stringify({ cmd, timeoutMs: 90000 })
+    body: JSON.stringify({ cmd, timeoutMs: 290000 })
   });
   const j = await r.json();
   console.log('code:', j.code);
