@@ -49,6 +49,29 @@ function StatusChip({ status }) {
   )
 }
 
+function StatsRow({ build }) {
+  const s = build.stats
+  if (!s || !s.steps) return null
+  const dur = build.finishedAt && build.startedAt
+    ? Math.round((build.finishedAt - build.startedAt) / 1000)
+    : Math.round((Date.now() - build.startedAt) / 1000)
+  const items = [
+    ['⏱', `${dur}s`],
+    ['▲', `${s.inputTokens} in`],
+    ['▼', `${s.outputTokens} out`],
+    ['◎', `ctx ${s.totalTokens}/32k`],
+    ['✦', `${s.steps} step${s.steps === 1 ? '' : 's'}`],
+    ['$', s.cost > 0 ? `$${s.cost.toFixed(4)}` : 'local']
+  ]
+  return (
+    <div className="stats-row">
+      {items.map(([ic, label]) => (
+        <span key={label} className="stat-chip"><span className="stat-ic">{ic}</span>{label}</span>
+      ))}
+    </div>
+  )
+}
+
 function BuildView({ buildId }) {
   const [build, setBuild] = useState(null)
   const [files, setFiles] = useState([])
@@ -73,7 +96,7 @@ function BuildView({ buildId }) {
   }, [buildId])
 
   useEffect(() => {
-    if (build?.status === 'done' && files.length === 0) {
+    if ((build?.status === 'done' || build?.status === 'error') && files.length === 0) {
       fetch(`/api/builds/${buildId}/files`).then(r => r.json()).then(setFiles).catch(() => {})
     }
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
@@ -93,6 +116,7 @@ function BuildView({ buildId }) {
           <StatusChip status={build.status} />
           <span className="mono-dim">build {build.id} · {build.model}</span>
         </div>
+        <StatsRow build={build} />
         <pre className="prompt-quote">{build.prompt}</pre>
         <pre className="log-pane" ref={logRef}>
           {(build.logs || []).map((l, i) => <div key={i}>{l.line}</div>)}
@@ -123,6 +147,7 @@ function BuildView({ buildId }) {
 
 export default function App() {
   const [authed, setAuthed] = useState(null)
+  const [models, setModels] = useState([])
   const [model, setModel] = useState('')
   const [prompt, setPrompt] = useState('')
   const [starting, setStarting] = useState(false)
@@ -136,13 +161,21 @@ export default function App() {
 
   useEffect(() => {
     fetch('/api/auth/check').then(r => {
-      if (r.ok) { setAuthed(true); fetch('/api/config').then(x => x.json()).then(c => setModel(c.model)); refreshHistory() }
-      else setAuthed(false)
+      if (r.ok) {
+        setAuthed(true)
+        fetch('/api/models').then(x => x.json()).then(m => {
+          setModels(m.models); setModel(m.default || m.models[0] || '')
+        }).catch(() => {})
+        refreshHistory()
+      } else setAuthed(false)
     }).catch(() => setAuthed(false))
   }, [])
 
   if (authed === null) return <div className="loading">Connecting…</div>
-  if (!authed) return <Login onAuthed={() => { setAuthed(true); fetch('/api/config').then(x => x.json()).then(c => setModel(c.model)) }} />
+  if (!authed) return <Login onAuthed={() => {
+    setAuthed(true)
+    fetch('/api/models').then(x => x.json()).then(m => { setModels(m.models); setModel(m.default || m.models[0] || '') }).catch(() => {})
+  }} />
 
   async function logout() {
     await fetch('/api/auth/logout', { method: 'POST' }); setAuthed(false)
@@ -154,7 +187,7 @@ export default function App() {
     try {
       const r = await fetch('/api/builds', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt })
+        body: JSON.stringify({ prompt, model })
       })
       const j = await r.json()
       if (!r.ok) throw new Error(j.error || 'Failed to start')
@@ -185,8 +218,9 @@ export default function App() {
             value={prompt} onChange={e => setPrompt(e.target.value)} disabled={starting}
           />
           <div className="builder-side">
-            <select defaultValue="" disabled title="More providers arrive in Phase 3">
-              <option value="">{model ? model.split('/').pop() : 'ollama'}</option>
+            <select value={model} onChange={e => setModel(e.target.value)} title="Model (from Ollama on Unraid)">
+              {models.length === 0 && <option value="">ollama</option>}
+              {models.map(m => <option key={m} value={m}>{m}</option>)}
             </select>
             <button className="btn" style={{ flex: 1 }} disabled={starting || prompt.trim().length < 10} onClick={startBuild}>
               {starting ? 'Starting…' : 'Build it'}

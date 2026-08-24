@@ -1,7 +1,7 @@
 import express from 'express'
 import cors from 'cors'
 import crypto from 'crypto'
-import { getModel, createBuild, getBuild, listBuilds, listFiles, readFile } from './runner.js'
+import { getModel, createBuild, getBuild, listBuilds, listFiles, readFile, listOllamaModels } from './runner.js'
 
 const app = express()
 const port = process.env.PORT || 5000
@@ -91,12 +91,16 @@ app.post('/api/debug/exec', async (req, res) => {
 
 app.get('/api/auth/check', (req, res) => res.json({ authenticated: true }))
 app.get('/api/config', (req, res) => res.json({ model: getModel() }))
+app.get('/api/models', async (req, res) => {
+  const models = await listOllamaModels()
+  res.json({ models: models.length ? models : [getModel()], default: getModel() })
+})
 app.get('/api/builds', (req, res) => res.json(listBuilds()))
 
 app.post('/api/builds', (req, res) => {
   const prompt = req.body?.prompt?.trim()
   if (!prompt || prompt.length < 10) return res.status(400).json({ error: 'Prompt must be at least 10 characters' })
-  const result = createBuild(prompt)
+  const result = createBuild(prompt, req.body?.model)
   if (result.error) return res.status(409).json({ error: result.error })
   res.json(result.build)
 })

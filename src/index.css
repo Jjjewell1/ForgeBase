@@ -157,3 +157,15 @@ input[type='password']:focus { border-color: var(--accent); }
   font-family: ui-monospace, Consolas, monospace; font-size: 12.5px;
   line-height: 1.55; color: #c9d2e4; margin: 0;
 }
+
+.stats-row {
+  display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 2px;
+}
+.stat-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: ui-monospace, Consolas, monospace; font-size: 11.5px;
+  color: #9fb0cc; background: rgba(124,92,255,.07);
+  border: 1px solid var(--border); border-radius: 999px;
+  padding: 4px 11px;
+}
+.stat-ic { opacity: .75; }

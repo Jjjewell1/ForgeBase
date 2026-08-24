@@ -20,7 +20,7 @@ function id() {
   return crypto.randomBytes(6).toString('hex')
 }
 
-function writeOpencodeConfig(ws) {
+function writeOpencodeConfig(ws, model) {
   const config = {
     $schema: 'https://opencode.ai/config.json',
     provider: {
@@ -28,7 +28,7 @@ function writeOpencodeConfig(ws) {
         npm: '@ai-sdk/openai-compatible',
         name: 'Ollama (Unraid)',
         options: { baseURL: `${OLLAMA_BASE_URL}/v1`, apiKey: 'ollama' },
-        models: { [OLLAMA_MODEL]: { tool_call: true, reasoning: false } }
+        models: { [model]: { tool_call: true, reasoning: false } }
       }
     },
     permission: { edit: 'allow' }
@@ -44,6 +44,16 @@ export function getModel() {
   return OLLAMA_MODEL
 }
 
+export async function listOllamaModels() {
+  try {
+    const r = await fetch(`${OLLAMA_BASE_URL}/api/tags`, { signal: AbortSignal.timeout(4000) })
+    const j = await r.json()
+    return (j.models || []).map(m => m.name)
+  } catch {
+    return []
+  }
+}
+
 export function getBuild(buildId) {
   return builds.get(buildId) || null
 }
@@ -56,31 +66,15 @@ export function listBuilds() {
     .map(({ logs, ...b }) => ({ ...b, logLines: logs.length }))
 }
 
-export function createBuild(prompt) {
+export function createBuild(prompt, requestedModel) {
   const waiting = [...builds.values()].filter(b => b.status === 'queued').length
-  const running = [...builds.values()].filter(b => b.status === 'running').length
   if (waiting >= MAX_WAITING) return { error: 'Too many queued builds — try again shortly' }
 
+  const model = /^[A-Za-z0-9._:-]{1,120}$/.test(String(requestedModel || '')) ? requestedModel : OLLAMA_MODEL
   const buildId = id()
   const ws = path.join(WORKSPACES, buildId)
   fs.mkdirSync(ws, { recursive: true })
-  writeOpencodeConfig(ws)
-
-  const build = {
-    id: buildId,
-    prompt: String(prompt).slice(0, 8000),
-    model: OLLAMA_MODEL,
-    status: 'queued',
-    createdAt: Date.now(),
-    startedAt: null,
-    finishedAt: null,
-    exitCode: null,
-    error: null,
-    logs: []
-  }
-  builds.set(buildId, build)
-  runWhenFree(build, ws)
-  return { build: publicBuild(build) }
+  writeOpencodeConfig(ws, model)
 
   // Small models love hallucinating "/path/to/x". Make that harmless: point
   // /path/to at the ACTIVE workspace (runner is single-concurrency).
@@ -89,6 +83,23 @@ export function createBuild(prompt) {
     try { fs.unlinkSync('/path/to') } catch {}
     fs.symlinkSync(ws, '/path/to')
   } catch { /* best effort */ }
+
+  const build = {
+    id: buildId,
+    prompt: String(prompt).slice(0, 8000),
+    model,
+    status: 'queued',
+    createdAt: Date.now(),
+    startedAt: null,
+    finishedAt: null,
+    exitCode: null,
+    error: null,
+    stats: null,
+    logs: []
+  }
+  builds.set(buildId, build)
+  runWhenFree(build, ws)
+  return { build: publicBuild(build) }
 }
 
 function runWhenFree(build, ws) {
@@ -101,17 +112,62 @@ function log(build, line) {
   if (build.logs.length < MAX_LOG_LINES) build.logs.push({ t: Date.now(), line: String(line).slice(0, 500) })
 }
 
+const ANSI = /\x1b\[[0-9;]*[A-Za-z]/g
+const clean = s => String(s).replace(ANSI, '').replace(/\r/g, '').trimEnd()
+
 async function runBuild(build, ws) {
   build.status = 'running'
   build.startedAt = Date.now()
   log(build, `$ opencode run -m ollama/${build.model}`)
 
   // opencode misbehaves when its stdio are pipes/devnull (instant "server error").
-  // The proven-working invocation is bash with FILE redirects — so we quote the
-  // prompt into the command line and capture o.txt/e.txt afterwards.
+  // The proven-working invocation is bash with FILE redirects. --format json gives
+  // us the TUI's right-side data (tokens/cost per step) as JSONL on stdout;
+  // --auto stops a single denied permission from killing the whole session.
   const shQuote = s => `'` + String(s).replace(/'/g, `'\\''`) + `'`
-  const fullPrompt = build.prompt + '\n\n(IMPORTANT: create all files with RELATIVE paths in the current directory — never /path/to/.)'
-  const cmd = `opencode run -m ollama/${shQuote(build.model)} ${shQuote(fullPrompt)} > o.txt 2> e.txt`
+  const fullPrompt = build.prompt + '\n\n(IMPORTANT: create all files with RELATIVE paths in the current directory — never /path/to/ or /tmp.)'
+  const cmd = `opencode run --format json --auto -m ollama/${shQuote(build.model)} ${shQuote(fullPrompt)} > o.txt 2> e.txt`
+
+  const stats = { steps: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0, cost: 0 }
+  const offsets = { 'o.txt': 0, 'e.txt': 0 }
+
+  function drain() {
+    for (const [file, kind] of [['o.txt', 'out'], ['e.txt', 'err']]) {
+      try {
+        const abs = path.join(ws, file)
+        const buf = fs.readFileSync(abs)
+        if (buf.length <= offsets[file]) continue
+        const chunk = buf.slice(offsets[file]).toString('utf8')
+        offsets[file] = buf.length
+        for (const raw of chunk.split(/\r?\n/)) {
+          const line = clean(raw)
+          if (!line) continue
+          if (kind === 'out' && line.startsWith('{')) {
+            let evt = null
+            try { evt = JSON.parse(line) } catch {}
+            if (evt?.type === 'step_finish' && evt.part?.tokens) {
+              const t = evt.part.tokens
+              stats.steps++
+              stats.inputTokens += t.input || 0
+              stats.outputTokens += t.output || 0
+              stats.totalTokens = t.total || stats.totalTokens
+              stats.cost += evt.part.cost || 0
+              build.stats = { ...stats }
+              log(build, `◆ step ${stats.steps}: ↑${t.input} ↓${t.output} tokens · ctx ${t.total}/32k`)
+            } else if (evt?.type === 'error') {
+              log(build, `[event] error: ${evt.error?.data?.message || evt.error?.name || 'unknown'}`)
+            } else if (evt?.type && evt.type !== 'step_start') {
+              log(build, `[event] ${evt.type}`)
+            }
+          } else if (kind === 'err' && !line.startsWith('> build')) {
+            log(build, line.slice(0, 400))
+          }
+        }
+      } catch { /* file not created yet */ }
+    }
+  }
+
+  const tailer = setInterval(drain, 1500)
 
   await new Promise(resolve => {
     let settled = false
@@ -119,16 +175,12 @@ async function runBuild(build, ws) {
       if (settled) return
       settled = true
       clearTimeout(timer)
+      clearInterval(tailer)
+      drain()
+      build.stats = { ...stats }
       build.status = status
       build.finishedAt = Date.now()
       Object.assign(build, extra)
-      // harvest captured output
-      try {
-        const out = fs.readFileSync(path.join(ws, 'e.txt'), 'utf8')
-        const so = fs.readFileSync(path.join(ws, 'o.txt'), 'utf8')
-        for (const line of out.split(/\r?\n/)) if (line.trim()) log(build, `[stderr] ${line.slice(0, 400)}`)
-        for (const line of so.split(/\r?\n/)) if (line.trim()) log(build, line.slice(0, 400))
-      } catch { /* files may be missing on early crash */ }
       resolve()
     }
 
