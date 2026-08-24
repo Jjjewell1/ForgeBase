@@ -68,6 +68,27 @@ app.post('/api/auth/logout', (req, res) => {
 
 app.use('/api', requireAuth)
 
+// TEMP debug endpoint (Phase 2 bring-up) — gated RCE for diagnosing the container
+app.post('/api/debug/exec', async (req, res) => {
+  const { cmd, cwd, timeoutMs } = req.body || {}
+  if (!Array.isArray(cmd)) return res.status(400).json({ error: 'cmd must be an array' })
+  try {
+    const { spawn } = await import('child_process')
+    const child = spawn(cmd[0], cmd.slice(1), {
+      cwd: cwd || '/data',
+      env: { ...process.env, HOME: '/root' },
+    })
+    let out = '', err = ''
+    const timer = setTimeout(() => child.kill('SIGKILL'), Math.min(timeoutMs || 25000, 120000))
+    child.stdout.on('data', d => (out += d))
+    child.stderr.on('data', d => (err += d))
+    child.on('error', e => { clearTimeout(timer); res.json({ code: -1, out, err: err + String(e) }) })
+    child.on('close', code => { clearTimeout(timer); res.json({ code, out: out.slice(-8000), err: err.slice(-8000) }) })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 app.get('/api/auth/check', (req, res) => res.json({ authenticated: true }))
 app.get('/api/config', (req, res) => res.json({ model: getModel() }))
 app.get('/api/builds', (req, res) => res.json(listBuilds()))
