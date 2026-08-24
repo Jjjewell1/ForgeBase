@@ -206,6 +206,7 @@ async function runBuild(build, ws) {
 // ---- workspace file access ------------------------------------------------
 
 const SKIP = new Set(['node_modules', '.git', '.opencode', 'dist'])
+const SKIP_FILES = new Set(['o.txt', 'e.txt', 'opencode.json', 'AGENTS.md'])
 
 export function listFiles(buildId) {
   const ws = safeWs(buildId)
@@ -218,7 +219,7 @@ export function listFiles(buildId) {
       const abs = path.join(dir, entry.name)
       const r = rel ? `${rel}/${entry.name}` : entry.name
       if (entry.isDirectory()) walk(abs, r)
-      else out.push({ path: r, size: entry.isFile() ? fs.statSync(abs).size : 0 })
+      else if (!SKIP_FILES.has(entry.name)) out.push({ path: r, size: fs.statSync(abs).size })
     }
   }
   walk(ws, '')
