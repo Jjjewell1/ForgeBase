@@ -43,6 +43,8 @@ export function getBuild(buildId) {
   return builds.get(buildId) || null
 }
 
+const publicBuild = ({ logs, ...b }) => ({ ...b })
+
 export function listBuilds() {
   return [...builds.values()]
     .sort((a, b) => b.createdAt - a.createdAt)
