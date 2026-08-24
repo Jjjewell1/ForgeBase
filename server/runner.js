@@ -105,8 +105,10 @@ async function runBuild(build, ws) {
       resolve()
     }
 
+    // stdin MUST be closed ('ignore') or opencode waits forever for piped input
     const child = spawn('opencode', ['run', '-m', `ollama/${build.model}`, build.prompt], {
       cwd: ws,
+      stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, OPENCODE_DISABLE_AUTOUPDATE: 'true' }
     })
 
