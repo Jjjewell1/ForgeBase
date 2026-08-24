@@ -10,7 +10,32 @@ services:
       - traefik.http.routers.forge.rule=Host(`forge.jewellcore.com`)
       - traefik.http.routers.forge.entrypoints=http
       - traefik.http.services.forge.loadbalancer.server.port=80
+    depends_on:
+      - backend
     restart: unless-stopped
+
+  backend:
+    build: ./server
+    networks:
+      - coolify
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=coolify
+      - traefik.http.routers.forge-api.rule=Host(`forge.jewellcore.com`) && PathPrefix(`/api`)
+      - traefik.http.routers.forge-api.entrypoints=http
+      - traefik.http.services.forge-api.loadbalancer.server.port=5000
+    environment:
+      - NODE_ENV=production
+      - FORGE_PASSWORD=${FORGE_PASSWORD}
+      - FORGE_SECRET=${FORGE_SECRET}
+      - OLLAMA_BASE_URL=http://192.168.1.154:11434
+      - OLLAMA_MODEL=qwen2.5-coder:7b
+    volumes:
+      - forge-data:/data
+    restart: unless-stopped
+
+volumes:
+  forge-data:
 
 networks:
   coolify:
